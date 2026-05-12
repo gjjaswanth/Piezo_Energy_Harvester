@@ -1,0 +1,269 @@
+* ============================================================
+* PIEZO ENERGY HARVESTER
+* Full-Wave Rectifier + Boost Converter
+* Corrected Working NGSpice Version
+* ============================================================
+
+.options reltol=1e-3 abstol=1e-9 vntol=1e-5
++ method=trap itl1=500 itl4=500
++ maxord=2 trtol=3 maxstep=1u
+
+.temp 27
+
+* ============================================================
+* PIEZO MODEL
+* Moderate realistic current source
+* ============================================================
+
+IP    VP_IN  0     SIN(0 2m 1k)
+
+CP    VP_IN  0     10n
+RP    VP_IN  0     20Meg
+
+* ============================================================
+* SCHOTTKY DIODE MODEL
+* Practical low-loss diode
+* ============================================================
+
+.model DSCH D(
++ Is=50n
++ Rs=0.15
++ N=1.03
++ Cjo=5p
++ Bv=40
++ Ibv=1u
+)
+
+* ============================================================
+* FULL-WAVE BRIDGE RECTIFIER
+* ============================================================
+
+D1   VP_IN   VREC    DSCH
+D2   0       VREC    DSCH
+D3   0       VP_IN   DSCH
+D4   VREC    VP_IN   DSCH
+
+* ============================================================
+* STORAGE CAPACITOR
+* Reduced for easier startup
+* ============================================================
+
+CREC   VREC   0   470n
+
+* ============================================================
+* RC FILTER
+* ============================================================
+
+RFILT   VREC       VREC_AVG    100k
+CFILT   VREC_AVG   0           470n
+
+* ============================================================
+* COMPARATOR
+* Ultra-low startup threshold
+* ============================================================
+
+BCOMP   COMP  0
++ V = ( V(VREC_AVG) > 0.08 ? 3.3 : 0 )
+
+* ============================================================
+* BOOST CLOCK (50kHz)
+* ============================================================
+
+VCLK  CLK  0
++ PULSE(0 3.3 0 200n 200n 9u 20u)
+
+* ============================================================
+* GATE DRIVE LOGIC
+* ============================================================
+
+BGDRV  GDRV_RAW  0
++ V = ((V(COMP)>1.5) && (V(CLK)>1.5) ? 3.3 : 0)
+
+* ============================================================
+* GATE FILTER
+* ============================================================
+
+RGDRV   GDRV_RAW   GDRV   1k
+CGDRV   GDRV       0      2n
+
+* ============================================================
+* SWITCH MODEL
+* ============================================================
+
+.model SW_BOOST SW(
++ RON=1
++ ROFF=10Meg
++ VT=1.65
++ VH=0.2
+)
+
+S1   SW_NODE   0   GDRV   0   SW_BOOST
+
+* ============================================================
+* SNUBBER
+* ============================================================
+
+RSNUB   SW_NODE   NSNUB   150
+CSNUB   NSNUB     0       330p
+
+* ============================================================
+* BOOST INDUCTOR
+* ============================================================
+
+L2    VREC    N_L2      22u
+RL2   N_L2    SW_NODE   0.3
+
+* ============================================================
+* OUTPUT DIODE
+* ============================================================
+
+DCATCH   SW_NODE   VOUT   DSCH
+
+* Freewheel clamp diode
+DFW      0         SW_NODE   DSCH
+
+* ============================================================
+* OUTPUT FILTER
+* ============================================================
+
+COUT   VOUT   0   22u
+
+* Light load for startup
+RLOAD  VOUT   0   220k
+
+* ============================================================
+* INITIAL CONDITIONS
+* ============================================================
+
+.ic
++ V(VREC)=0
++ V(VOUT)=0
++ V(VP_IN)=0
++ V(SW_NODE)=0
++ V(GDRV)=0
++ V(COMP)=0
++ V(VREC_AVG)=0
+
+* ============================================================
+* TRANSIENT ANALYSIS
+* ============================================================
+
+.tran 1u 500m uic
+
+* ============================================================
+* CONTROL BLOCK
+* ============================================================
+
+.control
+
+run
+
+echo ""
+echo "========================================="
+echo " PIEZO ENERGY HARVESTING RESULTS "
+echo "========================================="
+
+* ------------------------------------------------------------
+* STARTUP TIME
+* ------------------------------------------------------------
+
+meas tran startup_time
++ WHEN v(VREC_AVG)=0.08 RISE=1
+
+* ------------------------------------------------------------
+* OUTPUT VOLTAGES
+* ------------------------------------------------------------
+
+meas tran vout_100
++ FIND v(VOUT) AT=100m
+
+meas tran vout_300
++ FIND v(VOUT) AT=300m
+
+meas tran vout_500
++ FIND v(VOUT) AT=500m
+
+* ------------------------------------------------------------
+* AVERAGE VALUES
+* ------------------------------------------------------------
+
+meas tran vin_avg
++ AVG v(VP_IN) FROM=300m TO=500m
+
+meas tran iin_avg
++ AVG i(IP) FROM=300m TO=500m
+
+meas tran vout_avg
++ AVG v(VOUT) FROM=300m TO=500m
+
+* ------------------------------------------------------------
+* POWER CALCULATIONS
+* ------------------------------------------------------------
+
+let pin  = abs(vin_avg * iin_avg)
+
+let pout = (vout_avg * vout_avg)/220k
+
+let efficiency = (pout/pin)*100
+
+* ------------------------------------------------------------
+* CAPACITOR ENERGY
+* ------------------------------------------------------------
+
+let ecap = 0.5 * 22u * (vout_avg*vout_avg)
+
+echo ""
+echo "========== PERFORMANCE =========="
+
+print startup_time
+print vout_100
+print vout_300
+print vout_500
+
+echo ""
+echo "Input Power:"
+print pin
+
+echo ""
+echo "Output Power:"
+print pout
+
+echo ""
+echo "Efficiency (%):"
+print efficiency
+
+echo ""
+echo "Stored Capacitor Energy:"
+print ecap
+
+echo ""
+echo "Generating plots..."
+
+* ------------------------------------------------------------
+* WAVEFORMS
+* ------------------------------------------------------------
+
+plot v(VP_IN)
++ title "Piezo Input Voltage"
+
+plot v(VREC)
++ title "Rectified Voltage"
+
+plot v(VREC) v(VREC_AVG)
++ title "Rectified and Averaged Voltage"
+
+plot v(COMP)
++ title "Comparator Output"
+
+plot v(GDRV)
++ title "Gate Drive Signal"
+
+plot v(SW_NODE)
++ title "Switching Node"
+
+plot v(VOUT)
++ title "Boost Converter Output Voltage"
+
+.endc
+
+.end
